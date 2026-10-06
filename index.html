@@ -138,7 +138,7 @@ textarea{font:inherit;font-size:12px;width:100%;min-height:90px;border:1px solid
     </div>
     <div class="card">
       <h2>Consultar a Claude</h2>
-      <p class="note" style="margin-top:0">Copia un resumen de este mes y abre un chat con Claude. Pegalo en el chat y hacé tu pregunta.</p>
+      <p class="note" style="margin-top:0" id="claudeNota">Copia un resumen de este mes y abre un chat con Claude. Pegalo en el chat y hacé tu pregunta.</p>
       <div class="btns"><a class="btn" id="claudeBtn" href="https://claude.ai/new" target="_blank" rel="noopener" style="text-decoration:none">Copiar resumen y abrir Claude</a></div>
       <textarea id="resumenTxt" aria-label="Resumen del mes" readonly hidden style="margin-top:10px"></textarea>
     </div>
@@ -211,6 +211,15 @@ textarea{font:inherit;font-size:12px;width:100%;min-height:90px;border:1px solid
         <label class="f">Día de pago (opcional)<input id="fDia" inputmode="numeric"></label>
         <label class="f">¿Va en la tarjeta?<select id="fTarjeta"><option value="no">No</option><option value="si">Sí</option></select></label>
         <div class="btns full"><button class="btn" type="submit" id="fGuardar">Agregar gasto fijo</button><button class="btn ghost" type="button" id="fCancelar" hidden>Cancelar</button></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h2>Chat con Claude</h2>
+      <p class="note" style="margin-top:0">Pegá el link de tu chat con Claude para que el botón "Consultar a Claude" abra siempre esa conversación. Si lo dejás vacío, abre un chat nuevo.</p>
+      <form class="grid" id="claudeForm">
+        <label class="f full">Link del chat<input id="claudeUrlInput" type="url" inputmode="url" placeholder="https://claude.ai/..."></label>
+        <button class="btn full" type="submit">Guardar link</button>
       </form>
     </div>
 
@@ -446,6 +455,9 @@ function renderAjustes(){
     fc.append(el("div",{class:"row"}, el("div",{class:"main"}, el("div",{class:"t",text:f.nombre}), el("div",{class:"d",text:fmt(f.monto)+((f.frecuencia||1)>1?" cada "+f.frecuencia+" meses":" por mes")+(f.dia?" · día "+f.dia:"")+(f.tarjeta?" · en la tarjeta":"")})), ed, x));
   });
   if (datos.fijos.length) fc.append(el("div",{class:"total"}, el("span",{text:"Promedio por mes"}), el("span",{text:fmt(totalMensual)})));
+  if (document.activeElement !== $("claudeUrlInput")) $("claudeUrlInput").value = datos.claudeUrl || "";
+  $("claudeBtn").href = datos.claudeUrl || "https://claude.ai/new";
+  $("claudeNota").textContent = datos.claudeUrl ? "Copia un resumen de este mes y abre tu chat con Claude. Pegalo en el chat y hacé tu pregunta." : "Copia un resumen de este mes y abre un chat nuevo con Claude. Podés guardar el link de tu chat en Ajustes.";
   $("notifBtn").hidden = !("Notification" in window) || Notification.permission === "granted";
 }
 function editarDeuda(d){
@@ -555,6 +567,13 @@ async function avisar(forzar){
   try { const reg = await navigator.serviceWorker?.ready; if (reg) reg.showNotification("Vencimientos próximos", {body: cuerpo, icon: "icon-192.png", tag: "vencimientos"}); else new Notification("Vencimientos próximos", {body: cuerpo, icon: "icon-192.png"}); } catch(e){}
 }
 
+
+$("claudeForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("claudeUrlInput").value.trim();
+  if (v && !/^https:\/\/([a-z0-9-]+\.)*claude\.(ai|com)\//i.test(v)){ toast("Pegá un link que empiece con https://claude.ai/"); return; }
+  datos.claudeUrl = v || null; guardar(); document.activeElement.blur(); render(); toast(v ? "Link guardado" : "Se abrirá un chat nuevo");
+});
 
 /* Resumen para consultar a Claude */
 function resumenTexto(ym){

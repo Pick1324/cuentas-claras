@@ -136,6 +136,12 @@ textarea{font:inherit;font-size:12px;width:100%;min-height:90px;border:1px solid
       <h2>Vencimientos del mes</h2>
       <div class="rows" id="vtoRows"></div>
     </div>
+    <div class="card">
+      <h2>Consultar a Claude</h2>
+      <p class="note" style="margin-top:0">Copia un resumen de este mes y abre un chat con Claude. Pegalo en el chat y hacé tu pregunta.</p>
+      <div class="btns"><a class="btn" id="claudeBtn" href="https://claude.ai/new" target="_blank" rel="noopener" style="text-decoration:none">Copiar resumen y abrir Claude</a></div>
+      <textarea id="resumenTxt" aria-label="Resumen del mes" readonly hidden style="margin-top:10px"></textarea>
+    </div>
   </section>
 
   <!-- GASTOS -->
@@ -548,6 +554,31 @@ async function avisar(forzar){
   const cuerpo = prox.map(x => (x.diff===0?"Hoy":"En "+x.diff+"d") + ": " + x.t + " " + fmt(x.monto)).join("\n");
   try { const reg = await navigator.serviceWorker?.ready; if (reg) reg.showNotification("Vencimientos próximos", {body: cuerpo, icon: "icon-192.png", tag: "vencimientos"}); else new Notification("Vencimientos próximos", {body: cuerpo, icon: "icon-192.png"}); } catch(e){}
 }
+
+
+/* Resumen para consultar a Claude */
+function resumenTexto(ym){
+  const r = resumen(ym), L = [];
+  L.push("Resumen de Cuentas Claras - " + mesTitulo(ym) + " (montos en pesos argentinos)");
+  L.push("Ingreso neto: " + fmt(datos.ingreso) + " (cobro el día " + (datos.diaCobro||1) + ")");
+  L.push("Cuotas de deudas del mes: " + fmt(r.deuda) + " | Gastos fijos: " + fmt(r.fijos) + " | Gastos anotados: " + fmt(r.gastado));
+  L.push("Me queda para el resto del mes: " + fmt(r.queda));
+  L.push(""); L.push("Vencimientos del mes:");
+  r.items.forEach(x => { const st = estadoItem(x, ym); L.push("- " + (x.dia ? "Día " + x.dia + ": " : "") + x.t + " " + fmt(x.monto) + " (" + (st.hecho ? "pagado" : (st.txt ? st.txt.toLowerCase() : "pendiente")) + ")"); });
+  if (datos.deudas.length){ L.push(""); L.push("Deudas:");
+    datos.deudas.forEach(d => { const e = deudaEstado(d); L.push("- " + d.nombre + ": próxima cuota " + fmt(e.proxima) + ", faltan " + e.rest + " de " + d.total + " cuotas (" + fmt(e.pend) + "), termina " + mesCorto(e.fin) + (d.costo ? ", costo " + String(d.costo).replace(".",",") + "% mensual" : "")); }); }
+  const tot = {}; datos.gastos.filter(g=>g.mes===ym).forEach(g => tot[g.cat] = (tot[g.cat]||0) + g.monto);
+  const cats = Object.keys(tot);
+  if (cats.length){ L.push(""); L.push("Gastos anotados por categoría:"); cats.sort((a,b)=>tot[b]-tot[a]).forEach(c => L.push("- " + c + ": " + fmt(tot[c]))); }
+  L.push(""); L.push("Mi pregunta: ");
+  return L.join("\n");
+}
+$("claudeBtn").addEventListener("click", () => {
+  const t = $("resumenTxt"); t.value = resumenTexto(mes);
+  if (navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(t.value).then(() => toast("Resumen copiado: pegalo en el chat")).catch(() => { t.hidden = false; t.select(); toast("Copiá el resumen a mano"); });
+  } else { t.hidden = false; t.select(); toast("Copiá el resumen a mano"); }
+});
 
 /* ---------- Arranque ---------- */
 if ("serviceWorker" in navigator) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));

@@ -1,5 +1,5 @@
 // Guarda la app en el celular para que funcione sin internet.
-const CACHE = "cuentas-claras-v3";
+const CACHE = "cuentas-claras-v4";
 const ARCHIVOS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {

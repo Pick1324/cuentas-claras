@@ -94,6 +94,8 @@ input,select{font:inherit;font-size:15px;color:var(--ink);background:var(--bg);b
 .kv small{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .kv b{font-size:15px}
 .head{display:flex;justify-content:space-between;gap:8px;align-items:flex-start}
+.linkbtn{font:inherit;font-size:12px;font-weight:600;background:none;border:0;color:var(--accent);padding:2px 0;cursor:pointer;text-decoration:underline;text-underline-offset:2px}
+.omit .t,.omit .amt{color:var(--muted);text-decoration:line-through}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;font-weight:600;z-index:10;max-width:90vw}
 nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:6;background:var(--surface);border-top:1px solid var(--line);display:flex;justify-content:center;padding-bottom:env(safe-area-inset-bottom,0px)}
 nav.tabs div{display:flex;max-width:560px;width:100%}
@@ -136,6 +138,17 @@ textarea{font:inherit;font-size:12px;width:100%;min-height:90px;border:1px solid
       <h2>Vencimientos del mes</h2>
       <div class="rows" id="vtoRows"></div>
     </div>
+    <div class="card">
+      <h2>Ingresos extra del mes</h2>
+      <p class="note" style="margin-top:0">Plata que entra aparte del sueldo: una devolución, un trabajo extra, el aguinaldo. Se suma a lo que te queda este mes.</p>
+      <div class="rows" id="extrasRows"></div>
+      <form class="grid" id="extraForm" style="margin-top:10px">
+        <input id="extraMonto" inputmode="numeric" placeholder="Monto" aria-label="Monto del ingreso extra">
+        <input id="extraNota" placeholder="Detalle (ej.: devolución)" aria-label="Detalle del ingreso extra">
+        <button class="btn ghost full" type="submit">Agregar ingreso extra</button>
+      </form>
+    </div>
+
     <div class="card">
       <h2>Consultar a Claude</h2>
       <p class="note" style="margin-top:0" id="claudeNota">Copia un resumen de este mes y abre un chat con Claude. Pegalo en el chat y hacé tu pregunta.</p>
@@ -284,7 +297,7 @@ const hoy = new Date(), hoyYM = ymOf(hoy), hoyISO = hoy.getFullYear()+"-"+pad(ho
 function toast(msg){ const t = $("toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(()=>t.hidden = true, 2600); }
 
 /* ---------- Datos ---------- */
-const VACIO = () => ({version:1, ingreso:0, diaCobro:1, deudas:[], fijos:[], gastos:[], checks:{}});
+const VACIO = () => ({version:1, ingreso:0, diaCobro:1, deudas:[], fijos:[], gastos:[], checks:{}, extras:[], omitir:{}});
 function cargar(){ try { const d = JSON.parse(localStorage.getItem(KEY)); if (d && typeof d === "object") return Object.assign(VACIO(), d); } catch(e){} return VACIO(); }
 let datos = cargar();
 function guardar(){ try { localStorage.setItem(KEY, JSON.stringify(datos)); } catch(e){ toast("No se pudo guardar en este navegador"); } }
@@ -307,15 +320,17 @@ function fijoDelMes(f, ym){
 function compromisos(ym){
   const items = [];
   datos.deudas.forEach(d => { const m = cuotaDelMes(d, ym); if (m) items.push({id:"d_"+d.id, dia:d.dia||1, t:d.nombre, d:"Cuota " + (ymDiff(d.primera, ym)+1) + " de " + d.total, monto:m, tipo:"deuda"}); });
-  datos.fijos.forEach(f => { const m = fijoDelMes(f, ym); if (m) items.push({id:"f_"+f.id, dia:f.dia||null, t:f.nombre, d:(f.tarjeta ? "Se paga con la tarjeta" : "Gasto fijo") + ((f.frecuencia||1) > 1 ? " · cada " + f.frecuencia + " meses" : ""), monto:m, tipo:"fijo"}); });
+  datos.fijos.forEach(f => { const m = fijoDelMes(f, ym); if (m) items.push({id:"f_"+f.id, dia:f.dia||null, t:f.nombre, d:(f.tarjeta ? "Se paga con la tarjeta" : "Gasto fijo") + ((f.frecuencia||1) > 1 ? " · cada " + f.frecuencia + " meses" : ""), monto:m, tipo:"fijo", omit: !!(datos.omitir[ym]||{})["f_"+f.id]}); });
   return items.sort((a,b)=>(a.dia||40)-(b.dia||40));
 }
 function resumen(ym){
   const items = compromisos(ym);
   const deuda = items.filter(x=>x.tipo==="deuda").reduce((s,x)=>s+x.monto,0);
-  const fijos = items.filter(x=>x.tipo==="fijo").reduce((s,x)=>s+x.monto,0);
+  const fijos = items.filter(x=>x.tipo==="fijo" && !x.omit).reduce((s,x)=>s+x.monto,0);
   const gastado = datos.gastos.filter(g=>g.mes===ym).reduce((s,g)=>s+g.monto,0);
-  return {items, deuda, fijos, gastado, queda: (datos.ingreso||0) - deuda - fijos - gastado};
+  const extras = (datos.extras||[]).filter(e=>e.mes===ym).reduce((s,e)=>s+e.monto,0);
+  const ingreso = (datos.ingreso||0) + extras;
+  return {items, deuda, fijos, gastado, extras, ingreso, queda: ingreso - deuda - fijos - gastado};
 }
 function estadoItem(x, ym){
   const hecho = !!(datos.checks[ym] || {})[x.id];
@@ -330,7 +345,7 @@ function proximos(dias){
   for (let k = 0; k <= 1; k++){
     const ym = ymAdd(hoyYM, k);
     compromisos(ym).forEach(x => {
-      if (!x.dia) return;
+      if (!x.dia || x.omit) return;
       const [y,m] = ym.split("-").map(Number);
       const f = new Date(y, m-1, Math.min(x.dia, new Date(y, m, 0).getDate()));
       const diff = Math.round((f - new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())) / 864e5);
@@ -352,9 +367,9 @@ function renderMes(){
   const r = resumen(mes);
   $("quedaBig").textContent = fmt(r.queda);
   $("quedaBig").classList.toggle("neg", r.queda < 0);
-  $("quedaSub").textContent = r.queda < 0 ? "Los gastos superan el ingreso este mes." : "Ingreso " + fmt(datos.ingreso) + " menos cuotas, gastos fijos y lo que ya anotaste.";
+  $("quedaSub").textContent = r.queda < 0 ? "Los gastos superan el ingreso este mes." : "Ingreso " + fmt(datos.ingreso) + (r.extras ? " + extra " + fmt(r.extras) : "") + " menos cuotas, gastos fijos y lo que ya anotaste.";
   const segs = [["Deudas",r.deuda,"--seg-deuda"],["Fijos",r.fijos,"--seg-fijo"],["Gastado",r.gastado,"--seg-gasto"]];
-  const base = Math.max(datos.ingreso||0, segs.reduce((s,x)=>s+x[1],0)) || 1;
+  const base = Math.max(r.ingreso||0, segs.reduce((s,x)=>s+x[1],0)) || 1;
   const bar = $("mesBar"), leg = $("mesLegend"); bar.textContent = ""; leg.textContent = "";
   segs.forEach(([n,v,c]) => { if (v>0) bar.append(el("i",{style:"width:"+(v/base*100)+"%;background:var("+c+")"})); leg.append(el("span",null, el("i",{style:"background:var("+c+")"}), n+" "+fmt(v))); });
 
@@ -367,16 +382,37 @@ function renderMes(){
   if (!r.items.length) rows.append(el("div",{class:"empty",text:"No hay vencimientos cargados para este mes."}));
   let total = 0;
   r.items.forEach(x => {
+    if (x.omit){
+      const back = el("button",{class:"linkbtn",type:"button",text:"Volver a contar"});
+      back.addEventListener("click", () => { const o = Object.assign({}, datos.omitir[mes]); delete o[x.id]; datos.omitir[mes] = o; guardar(); render(); });
+      rows.append(el("div",{class:"row omit"}, el("div",{class:"main"}, el("div",{class:"t",text:(x.dia?"Día "+x.dia+" · ":"")+x.t}), el("div",{class:"d",text:"No se cuenta este mes"}), back), el("div",{class:"side"}, el("span",{class:"amt",text:fmt(x.monto)}))));
+      return;
+    }
     total += x.monto;
     const st = estadoItem(x, mes);
     const cb = el("input",{type:"checkbox",class:"check",id:"chk-"+x.id,"aria-label":"Marcar "+x.t+" como pagado"});
     cb.checked = st.hecho;
     cb.addEventListener("change", () => { datos.checks[mes] = Object.assign({}, datos.checks[mes], {[x.id]: cb.checked}); guardar(); renderMes(); });
     rows.append(el("div",{class:"row"+(st.hecho?" done":"")}, cb,
-      el("div",{class:"main"}, el("div",{class:"t",text:(x.dia?"Día "+x.dia+" · ":"")+x.t}), el("div",{class:"d",text:x.d})),
+      el("div",{class:"main"}, el("div",{class:"t",text:(x.dia?"Día "+x.dia+" · ":"")+x.t}), el("div",{class:"d",text:x.d}), x.tipo==="fijo" ? omitBtn(x) : null),
       el("div",{class:"side"}, el("span",{class:"amt",text:fmt(x.monto)}), st.txt ? el("span",{class:"pill "+st.cls,text:st.txt}) : null)));
   });
   if (r.items.length) rows.append(el("div",{class:"total"}, el("span",{text:"Total del mes"}), el("span",{text:fmt(total)})));
+
+  const er = $("extrasRows"); er.textContent = "";
+  const ex = (datos.extras||[]).filter(e=>e.mes===mes);
+  if (!ex.length) er.append(el("div",{class:"empty",text:"Sin ingresos extra este mes."}));
+  ex.forEach(e => {
+    const x = el("button",{class:"x","aria-label":"Borrar ingreso extra",text:"×"});
+    x.addEventListener("click", () => { datos.extras = datos.extras.filter(z=>z.id!==e.id); guardar(); render(); toast("Ingreso extra borrado"); });
+    er.append(el("div",{class:"row"}, el("div",{class:"main"}, el("div",{class:"t",text:e.nota || "Ingreso extra"})), el("span",{class:"amt",text:"+ "+fmt(e.monto)}), x));
+  });
+  if (ex.length > 1) er.append(el("div",{class:"total"}, el("span",{text:"Total extra"}), el("span",{text:"+ "+fmt(r.extras)})));
+}
+function omitBtn(x){
+  const b = el("button",{class:"linkbtn",type:"button",text:"No contar este mes"});
+  b.addEventListener("click", () => { datos.omitir[mes] = Object.assign({}, datos.omitir[mes], {[x.id]: true}); guardar(); render(); toast("No se cuenta en " + mesNombre(mes).split(" ")[0]); });
+  return b;
 }
 
 function renderGastos(){
@@ -526,6 +562,14 @@ $("gastoForm").addEventListener("submit", e => {
   guardar(); render(); toast("Gasto anotado");
 });
 
+$("extraForm").addEventListener("submit", e => {
+  e.preventDefault();
+  const monto = num($("extraMonto").value); if (!monto){ toast("Ingresá un monto"); return; }
+  datos.extras = (datos.extras||[]).concat([{id: uid("x"), monto, nota: $("extraNota").value.trim(), mes, creado: Date.now()}]);
+  $("extraMonto").value = ""; $("extraNota").value = "";
+  guardar(); render(); toast("Ingreso extra agregado");
+});
+
 /* Respaldo */
 function aplicarRespaldo(txt){
   try {
@@ -581,9 +625,10 @@ function resumenTexto(ym){
   L.push("Resumen de Cuentas Claras - " + mesTitulo(ym) + " (montos en pesos argentinos)");
   L.push("Ingreso neto: " + fmt(datos.ingreso) + " (cobro el día " + (datos.diaCobro||1) + ")");
   L.push("Cuotas de deudas del mes: " + fmt(r.deuda) + " | Gastos fijos: " + fmt(r.fijos) + " | Gastos anotados: " + fmt(r.gastado));
+  if (r.extras) L.push("Ingresos extra del mes: " + fmt(r.extras));
   L.push("Me queda para el resto del mes: " + fmt(r.queda));
   L.push(""); L.push("Vencimientos del mes:");
-  r.items.forEach(x => { const st = estadoItem(x, ym); L.push("- " + (x.dia ? "Día " + x.dia + ": " : "") + x.t + " " + fmt(x.monto) + " (" + (st.hecho ? "pagado" : (st.txt ? st.txt.toLowerCase() : "pendiente")) + ")"); });
+  r.items.forEach(x => { if (x.omit){ L.push("- " + x.t + " " + fmt(x.monto) + " (no se cuenta este mes)"); return; } const st = estadoItem(x, ym); L.push("- " + (x.dia ? "Día " + x.dia + ": " : "") + x.t + " " + fmt(x.monto) + " (" + (st.hecho ? "pagado" : (st.txt ? st.txt.toLowerCase() : "pendiente")) + ")"); });
   if (datos.deudas.length){ L.push(""); L.push("Deudas:");
     datos.deudas.forEach(d => { const e = deudaEstado(d); L.push("- " + d.nombre + ": próxima cuota " + fmt(e.proxima) + ", faltan " + e.rest + " de " + d.total + " cuotas (" + fmt(e.pend) + "), termina " + mesCorto(e.fin) + (d.costo ? ", costo " + String(d.costo).replace(".",",") + "% mensual" : "")); }); }
   const tot = {}; datos.gastos.filter(g=>g.mes===ym).forEach(g => tot[g.cat] = (tot[g.cat]||0) + g.monto);
